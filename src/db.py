@@ -74,7 +74,12 @@ PRESERVE_ON_UPSERT = {"user_status", "user_notes", "first_seen_at", "id"}
 
 def get_engine(settings: Settings | None = None) -> Engine:
     settings = settings or get_settings()
-    return create_engine(settings.database_url, pool_pre_ping=True, future=True)
+    database_url = settings.database_url
+
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+pg8000://", 1)
+
+    return create_engine(database_url, pool_pre_ping=True, future=True)
 
 
 def init_db(engine: Engine | None = None) -> None:
