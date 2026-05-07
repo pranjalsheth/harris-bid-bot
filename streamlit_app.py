@@ -401,47 +401,139 @@ c4.metric("KEEP total", int((df["keep_exclude"] == "KEEP").sum()))
 best_bid = filtered["suggested_bid"].max() if not filtered.empty else None
 c5.metric("Largest suggested bid", money(best_bid))
 
-show_cols = [
-    "decision",
-    "deal_status",
-    "source",
-    "is_hud_reo",
-    "address",
-    "zip",
-    "property_type",
-    "total_beds",
-    "sale_price",
+st.subheader("Deals")
+
+table = filtered.copy()
+
+rent_cols = [
     "har_mls_rent_total",
     "rentometer_rent_total",
     "rentcast_rent_total",
     "hud_safmr_rent_total",
-    "lowest_rent_comp",
-    "max_bid_1pct",
-    "suggested_bid",
-    "spread_to_ask",
-    "flood_flag",
-    "last_sale_price",
-    "last_sale_year",
-    "contact_email",
 ]
 
-st.subheader("Deals")
-visible_table = filtered[show_cols].copy()
-for col in [
+for col in rent_cols:
+    if col not in table.columns:
+        table[col] = None
+
+table["average_rent"] = (
+    table[rent_cols]
+    .apply(pd.to_numeric, errors="coerce")
+    .mean(axis=1)
+)
+
+table["calculated_bid_price"] = table["average_rent"] * 100
+
+table["investability"] = (
+    table["average_rent"].fillna(0) * 12
+    / table["calculated_bid_price"].replace(0, pd.NA)
+)
+
+table["investability"] = table["investability"].fillna(0)
+
+table["property_link"] = table["source_url"]
+
+table["decision_status"] = table["user_status"].map(
+    {
+        "NEW": "New",
+        "REJECTED": "Denied",
+        "STARRED": "Interesting",
+        "CONTACTED": "Toured",
+        "BID_SUBMITTED": "Bidded",
+        "ARCHIVED": "Denied",
+    }
+).fillna(table["user_status"])
+
+if "days_on_market" not in table.columns:
+    table["days_on_market"] = ""
+
+if "contact_phone" not in table.columns:
+    table["contact_phone"] = ""
+
+if "contact_email" not in table.columns:
+    table["contact_email"] = ""
+
+if "flood_flag" not in table.columns:
+    table["flood_flag"] = ""
+
+if "baths" not in table.columns:
+    table["baths"] = ""
+
+if "total_beds" not in table.columns:
+    table["total_beds"] = ""
+
+if "sale_price" not in table.columns:
+    table["sale_price"] = None
+
+table = table.sort_values(
+    ["investability", "sale_price"],
+    ascending=[False, True]
+)
+
+show_cols = [
+    "property_link",
+    "decision_status",
+    "address",
     "sale_price",
+    "calculated_bid_price",
+    "average_rent",
+    "hud_safmr_rent_total",
+    "days_on_market",
     "har_mls_rent_total",
     "rentometer_rent_total",
     "rentcast_rent_total",
-    "hud_safmr_rent_total",
-    "lowest_rent_comp",
-    "max_bid_1pct",
-    "suggested_bid",
-    "spread_to_ask",
-    "last_sale_price",
+    "total_beds",
+    "baths",
+    "flood_flag",
+    "contact_email",
+    "contact_phone",
+]
+
+visible_table = table[show_cols].copy()
+
+rename_cols = {
+    "property_link": "Property Link",
+    "decision_status": "Decision / Status",
+    "address": "Address",
+    "sale_price": "Sale Price",
+    "calculated_bid_price": "Calculated Bid Price",
+    "average_rent": "Average Rent",
+    "hud_safmr_rent_total": "Section 8 Rent",
+    "days_on_market": "Days on Market",
+    "har_mls_rent_total": "HAR Rent",
+    "rentometer_rent_total": "Rentometer Rent",
+    "rentcast_rent_total": "RentCast Rent",
+    "total_beds": "Total Beds",
+    "baths": "Total Baths",
+    "flood_flag": "Flood Flag",
+    "contact_email": "Contact Email",
+    "contact_phone": "Contact Phone",
+}
+
+visible_table = visible_table.rename(columns=rename_cols)
+
+for col in [
+    "Sale Price",
+    "Calculated Bid Price",
+    "Average Rent",
+    "Section 8 Rent",
+    "HAR Rent",
+    "Rentometer Rent",
+    "RentCast Rent",
 ]:
     visible_table[col] = visible_table[col].map(money)
 
-st.dataframe(visible_table, use_container_width=True, height=420)
+st.dataframe(
+    visible_table,
+    use_container_width=True,
+    height=500,
+    column_config={
+        "Property Link": st.column_config.LinkColumn(
+            "Property Link",
+            display_text="Open Listing",
+        )
+    },
+)
 
 st.subheader("Review one property")
 if filtered.empty:
