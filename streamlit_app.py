@@ -14,7 +14,6 @@ st.set_page_config(page_title="Harris County Bid Dashboard", layout="wide")
 
 
 def load_streamlit_secrets_into_env() -> None:
-    """Streamlit Cloud stores secrets in st.secrets, while the backend reads env vars."""
     try:
         items = dict(st.secrets).items()
     except Exception:
@@ -50,15 +49,12 @@ def pick_col(df, possible_names):
     for name in possible_names:
         if name in exact:
             return exact[name]
-
         key = name.strip().lower()
         if key in lower:
             return lower[key]
-
         key2 = name.strip().lower().replace(" ", "_")
         if key2 in normalized:
             return normalized[key2]
-
     return None
 
 
@@ -107,16 +103,7 @@ def classify_keep_exclude(row):
     beds = row.get("total_beds")
 
     land_words = ["land", "lot", "acreage", "farm", "ranch", "commercial", "unimproved"]
-    allowed_words = [
-        "single",
-        "town",
-        "duplex",
-        "triplex",
-        "fourplex",
-        "multi",
-        "condos",
-        "condo",
-    ]
+    allowed_words = ["single", "town", "duplex", "triplex", "fourplex", "multi", "condos", "condo"]
 
     if not address or not zip_code:
         return "EXCLUDE"
@@ -128,7 +115,6 @@ def classify_keep_exclude(row):
         return "EXCLUDE"
     if prop_type and not any(w in prop_type for w in allowed_words):
         return "EXCLUDE"
-
     return "KEEP"
 
 
@@ -137,7 +123,7 @@ def build_email(address, city, zip_code, suggested_bid):
     subject = f"Offer inquiry for {address}"
     body = (
         f"Hi,\n\n"
-        f"I am reviewing {address}, {city}, TX {zip_code} and wanted to confirm whether it is still available and investor-eligible.\n\n"
+        f"I am reviewing {address} and wanted to confirm whether it is still available and investor-eligible.\n\n"
         f"Based on my current rental underwriting, I would be interested around {bid_text}, subject to property condition, access, title, inspection, and standard contract terms.\n\n"
         f"Could you please confirm current availability, best offer process, known repairs, flood history, HOA issues, and any investor restrictions?\n\n"
         f"Best,\n"
@@ -161,7 +147,7 @@ def import_apify_realtor_csv(engine, uploaded_file):
     col_sqft = pick_col(df, ["sqft", "square_feet"])
     col_type = pick_col(df, ["sub_type", "type", "property_type", "propertyType"])
     col_url = pick_col(df, ["url", "href", "listing_url", "listingUrl", "permalink"])
-    col_id = pick_col(df, ["property_id", "propertyId", "listing_id", "listingId", "id", "permalink", "url"])
+    col_id = pick_col(df, ["url", "property_id", "propertyId", "listing_id", "listingId", "id", "permalink"])
     col_lat = pick_col(df, ["coordinates/latitude", "lat", "latitude"])
     col_lon = pick_col(df, ["coordinates/longitude", "lon", "lng", "longitude"])
     col_contact_name = pick_col(df, ["agents/0/agent_name", "advertisers/0/name", "contact_name"])
@@ -174,11 +160,15 @@ def import_apify_realtor_csv(engine, uploaded_file):
 
     with engine.begin() as conn:
         for idx, r in df.iterrows():
-            address = str(r[col_address]).strip() if col_address and pd.notna(r[col_address]) else ""
+            street = str(r[col_address]).strip() if col_address and pd.notna(r[col_address]) else ""
             city = str(r[col_city]).strip() if col_city and pd.notna(r[col_city]) else ""
             state = str(r[col_state]).strip() if col_state and pd.notna(r[col_state]) else "TX"
             zip_code = str(r[col_zip]).strip() if col_zip and pd.notna(r[col_zip]) else ""
             zip_code = zip_code.split("-")[0].replace(".0", "")
+
+            address = street
+            if street and city and state and zip_code:
+                address = f"{street}, {city}, {state} {zip_code}"
 
             source_url = str(r[col_url]).strip() if col_url and pd.notna(r[col_url]) else None
             source_id = str(r[col_id]).strip() if col_id and pd.notna(r[col_id]) else None
@@ -211,13 +201,7 @@ def import_apify_realtor_csv(engine, uploaded_file):
                 }
             )
 
-            hud_safmr_rent_total = None
-            lowest_rent_comp = None
-            max_bid_1pct = None
-            suggested_bid = None
-            spread_to_ask = None
-
-            email_subject, email_body = build_email(address, city, zip_code, suggested_bid)
+            email_subject, email_body = build_email(address, city, zip_code, None)
 
             conn.execute(
                 text("""
@@ -225,7 +209,6 @@ def import_apify_realtor_csv(engine, uploaded_file):
                         source, source_id, source_url, address_key, address, city, state, zip, county,
                         lat, lon, property_type, total_beds, baths, sqft, year_built, sale_price,
                         investor_eligible, land_lot_exclusion, missing_address, flood_flag, keep_exclude,
-                        hud_safmr_rent_total, lowest_rent_comp, max_bid_1pct, suggested_bid, spread_to_ask,
                         contact_name, contact_email, contact_phone,
                         email_subject, email_body, raw_json, last_seen_at, updated_at
                     )
@@ -233,7 +216,6 @@ def import_apify_realtor_csv(engine, uploaded_file):
                         :source, :source_id, :source_url, :address_key, :address, :city, :state, :zip, :county,
                         :lat, :lon, :property_type, :total_beds, :baths, :sqft, :year_built, :sale_price,
                         :investor_eligible, :land_lot_exclusion, :missing_address, :flood_flag, :keep_exclude,
-                        :hud_safmr_rent_total, :lowest_rent_comp, :max_bid_1pct, :suggested_bid, :spread_to_ask,
                         :contact_name, :contact_email, :contact_phone,
                         :email_subject, :email_body, CAST(:raw_json AS jsonb), now(), now()
                     )
@@ -289,11 +271,6 @@ def import_apify_realtor_csv(engine, uploaded_file):
                     "missing_address": missing_address,
                     "flood_flag": "Unknown",
                     "keep_exclude": keep_exclude,
-                    "hud_safmr_rent_total": hud_safmr_rent_total,
-                    "lowest_rent_comp": lowest_rent_comp,
-                    "max_bid_1pct": max_bid_1pct,
-                    "suggested_bid": suggested_bid,
-                    "spread_to_ask": spread_to_ask,
                     "contact_name": contact_name,
                     "contact_email": contact_email,
                     "contact_phone": contact_phone,
@@ -323,11 +300,11 @@ def load_df() -> pd.DataFrame:
         return df
     df["decision"] = df["user_status"].map(
         {
-            "STARRED": "⭐ Interested",
-            "REJECTED": "❌ Rejected",
-            "CONTACTED": "Contacted",
-            "BID_SUBMITTED": "Bid Submitted",
-            "ARCHIVED": "Archived",
+            "STARRED": "Interesting",
+            "REJECTED": "Denied",
+            "CONTACTED": "Toured",
+            "BID_SUBMITTED": "Bidded",
+            "ARCHIVED": "Denied",
             "NEW": "New",
         }
     ).fillna(df["user_status"])
@@ -335,7 +312,7 @@ def load_df() -> pd.DataFrame:
 
 
 st.title("Harris County Rental Bid Dashboard")
-st.caption("Automated screen: Harris County, 2-5 beds, <= $400k, no lots/land, no major flood flag, max bid = lowest rent comp x 100.")
+st.caption("Harris County, 2-5 beds, <= $400k, no lots/land. Bid price = average rent x 100.")
 
 engine = engine_resource()
 
@@ -362,11 +339,11 @@ with st.sidebar:
             st.success(f"Update complete. Rows seen: {rows_seen}; rows upserted: {rows_upserted}.")
 
     st.divider()
-    show_keep_only = st.checkbox("Show KEEP only", value=True)
-    hide_rejected = st.checkbox("Hide red-X rejected", value=True)
+    show_keep_only = st.checkbox("Show KEEP only", value=False)
+    hide_rejected = st.checkbox("Hide denied / rejected", value=True)
     hud_only = st.checkbox("HUD-flagged only", value=False)
     status_filter = st.multiselect(
-        "User status",
+        "Decision / Status",
         ["NEW", "STARRED", "REJECTED", "CONTACTED", "BID_SUBMITTED", "ARCHIVED"],
         default=["NEW", "STARRED", "CONTACTED", "BID_SUBMITTED"],
     )
@@ -388,18 +365,11 @@ if hud_only:
     filtered = filtered[filtered["is_hud_reo"] == True]
 if status_filter:
     filtered = filtered[filtered["user_status"].isin(status_filter)]
+
 filtered = filtered[
     filtered["spread_to_ask"].isna() |
     (filtered["spread_to_ask"] >= min_spread)
 ]
-
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Visible deals", len(filtered))
-c2.metric("Starred", int((df["user_status"] == "STARRED").sum()))
-c3.metric("Ready to email", int((df["deal_status"] == "Ready to Email").sum()))
-c4.metric("KEEP total", int((df["keep_exclude"] == "KEEP").sum()))
-best_bid = filtered["suggested_bid"].max() if not filtered.empty else None
-c5.metric("Largest suggested bid", money(best_bid))
 
 st.subheader("Deals")
 
@@ -416,21 +386,10 @@ for col in rent_cols:
     if col not in table.columns:
         table[col] = None
 
-table["average_rent"] = (
-    table[rent_cols]
-    .apply(pd.to_numeric, errors="coerce")
-    .mean(axis=1)
-)
-
+table["average_rent"] = table[rent_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
 table["calculated_bid_price"] = table["average_rent"] * 100
 
-table["investability"] = (
-    table["average_rent"].fillna(0) * 12
-    / table["calculated_bid_price"].replace(0, pd.NA)
-)
-
-table["investability"] = table["investability"].fillna(0)
-
+table["investability"] = table["average_rent"].fillna(0)
 table["property_link"] = table["source_url"]
 
 table["decision_status"] = table["user_status"].map(
@@ -444,73 +403,56 @@ table["decision_status"] = table["user_status"].map(
     }
 ).fillna(table["user_status"])
 
-if "days_on_market" not in table.columns:
-    table["days_on_market"] = ""
-
-if "contact_phone" not in table.columns:
-    table["contact_phone"] = ""
-
-if "contact_email" not in table.columns:
-    table["contact_email"] = ""
-
-if "flood_flag" not in table.columns:
-    table["flood_flag"] = ""
-
-if "baths" not in table.columns:
-    table["baths"] = ""
-
-if "total_beds" not in table.columns:
-    table["total_beds"] = ""
+for col in ["days_on_market", "contact_phone", "contact_email", "flood_flag", "baths", "total_beds"]:
+    if col not in table.columns:
+        table[col] = ""
 
 if "sale_price" not in table.columns:
     table["sale_price"] = None
 
-table = table.sort_values(
-    ["investability", "sale_price"],
-    ascending=[False, True]
+table = table.sort_values(["investability", "sale_price"], ascending=[False, True])
+
+visible_table = table[
+    [
+        "property_link",
+        "decision_status",
+        "address",
+        "sale_price",
+        "calculated_bid_price",
+        "average_rent",
+        "hud_safmr_rent_total",
+        "days_on_market",
+        "har_mls_rent_total",
+        "rentometer_rent_total",
+        "rentcast_rent_total",
+        "total_beds",
+        "baths",
+        "flood_flag",
+        "contact_email",
+        "contact_phone",
+    ]
+].copy()
+
+visible_table = visible_table.rename(
+    columns={
+        "property_link": "Property Link",
+        "decision_status": "Decision / Status",
+        "address": "Address",
+        "sale_price": "Sale Price",
+        "calculated_bid_price": "Calculated Bid Price",
+        "average_rent": "Average Rent",
+        "hud_safmr_rent_total": "Section 8 Rent",
+        "days_on_market": "Days on Market",
+        "har_mls_rent_total": "HAR Rent",
+        "rentometer_rent_total": "Rentometer Rent",
+        "rentcast_rent_total": "RentCast Rent",
+        "total_beds": "Total Beds",
+        "baths": "Total Baths",
+        "flood_flag": "Flood Flag",
+        "contact_email": "Contact Email",
+        "contact_phone": "Contact Phone",
+    }
 )
-
-show_cols = [
-    "property_link",
-    "decision_status",
-    "address",
-    "sale_price",
-    "calculated_bid_price",
-    "average_rent",
-    "hud_safmr_rent_total",
-    "days_on_market",
-    "har_mls_rent_total",
-    "rentometer_rent_total",
-    "rentcast_rent_total",
-    "total_beds",
-    "baths",
-    "flood_flag",
-    "contact_email",
-    "contact_phone",
-]
-
-visible_table = table[show_cols].copy()
-
-rename_cols = {
-    "property_link": "Property Link",
-    "decision_status": "Decision / Status",
-    "address": "Address",
-    "sale_price": "Sale Price",
-    "calculated_bid_price": "Calculated Bid Price",
-    "average_rent": "Average Rent",
-    "hud_safmr_rent_total": "Section 8 Rent",
-    "days_on_market": "Days on Market",
-    "har_mls_rent_total": "HAR Rent",
-    "rentometer_rent_total": "Rentometer Rent",
-    "rentcast_rent_total": "RentCast Rent",
-    "total_beds": "Total Beds",
-    "baths": "Total Baths",
-    "flood_flag": "Flood Flag",
-    "contact_email": "Contact Email",
-    "contact_phone": "Contact Phone",
-}
-
-visible_table = visible_table.rename(columns=rename_cols)
 
 for col in [
     "Sale Price",
@@ -522,6 +464,13 @@ for col in [
     "RentCast Rent",
 ]:
     visible_table[col] = visible_table[col].map(money)
+
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("Visible deals", len(filtered))
+c2.metric("Interesting", int((df["user_status"] == "STARRED").sum()))
+c3.metric("Bidded", int((df["user_status"] == "BID_SUBMITTED").sum()))
+c4.metric("KEEP total", int((df["keep_exclude"] == "KEEP").sum()))
+c5.metric("Avg sale price", money(filtered["sale_price"].mean() if not filtered.empty else None))
 
 st.dataframe(
     visible_table,
@@ -537,10 +486,14 @@ st.dataframe(
 
 st.subheader("Review one property")
 if filtered.empty:
-    st.info("No rows match your filters. Try turning off 'Show KEEP only' in the sidebar.")
+    st.info("No rows match your filters.")
     st.stop()
 
-options = filtered.apply(lambda r: f"{r['address']} | {money(r['suggested_bid'])} bid | {r['decision']} | {r['deal_status']}", axis=1).tolist()
+options = filtered.apply(
+    lambda r: f"{r['address']} | {money(r['sale_price'])} ask | {as_text(r['decision'])}",
+    axis=1,
+).tolist()
+
 choice = st.selectbox("Select property", options, index=0)
 selected = filtered.iloc[options.index(choice)]
 deal_id = str(selected["id"])
@@ -551,32 +504,30 @@ with left:
     st.write(f"**City/ZIP:** {as_text(selected['city'])}, {as_text(selected['state'])} {as_text(selected['zip'])}")
     st.write(f"**Type:** {as_text(selected['property_type'])} | **Beds:** {as_text(selected['total_beds'])} | **Baths:** {as_text(selected['baths'])} | **Sq Ft:** {as_text(selected['sqft'])}")
     st.write(f"**Sale price:** {money(selected['sale_price'])}")
-    st.write(f"**Suggested bid:** {money(selected['suggested_bid'])} | **Spread to ask:** {money(selected['spread_to_ask'])}")
-    st.write(f"**Lowest rent comp:** {money(selected['lowest_rent_comp'])}")
     st.write(f"**Flood:** {as_text(selected['flood_flag'])} {as_text(selected['flood_zone'])}")
-    st.write(f"**Last sale:** {money(selected['last_sale_price'])} in {as_text(selected['last_sale_year'])}")
-    st.write(f"**Contact:** {as_text(selected['contact_name'])} / {as_text(selected['contact_email'])}")
+    st.write(f"**Contact:** {as_text(selected['contact_name'])} / {as_text(selected['contact_email'])} / {as_text(selected['contact_phone'])}")
+
     if as_text(selected.get("source_url")):
         st.link_button("Open source listing", selected["source_url"])
 
     b1, b2, b3, b4, b5 = st.columns(5)
-    if b1.button("⭐ Star", use_container_width=True):
+    if b1.button("Interesting", use_container_width=True):
         update_user_status(engine, deal_id, "STARRED")
         st.cache_data.clear()
         st.rerun()
-    if b2.button("❌ Red X", use_container_width=True):
+    if b2.button("Denied", use_container_width=True):
         update_user_status(engine, deal_id, "REJECTED")
         st.cache_data.clear()
         st.rerun()
-    if b3.button("Reset", use_container_width=True):
+    if b3.button("New", use_container_width=True):
         update_user_status(engine, deal_id, "NEW")
         st.cache_data.clear()
         st.rerun()
-    if b4.button("Contacted", use_container_width=True):
+    if b4.button("Toured", use_container_width=True):
         update_user_status(engine, deal_id, "CONTACTED")
         st.cache_data.clear()
         st.rerun()
-    if b5.button("Bid sent", use_container_width=True):
+    if b5.button("Bidded", use_container_width=True):
         update_user_status(engine, deal_id, "BID_SUBMITTED")
         st.cache_data.clear()
         st.rerun()
