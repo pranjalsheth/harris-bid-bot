@@ -5,6 +5,10 @@ import os
 import pandas as pd
 import streamlit as st
 
+import sqlite3
+
+conn = sqlite3.connect("deals.db", check_same_thread=False)
+
 from src.config import get_settings
 from src.db import fetch_dashboard_df, fetch_run_logs, get_engine, init_db, update_user_notes, update_user_status
 from src.pipeline import run_pipeline
