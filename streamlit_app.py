@@ -388,7 +388,10 @@ if hud_only:
     filtered = filtered[filtered["is_hud_reo"] == True]
 if status_filter:
     filtered = filtered[filtered["user_status"].isin(status_filter)]
-filtered = filtered[filtered["spread_to_ask"].fillna(-10**12) >= min_spread]
+filtered = filtered[
+    filtered["spread_to_ask"].isna() |
+    (filtered["spread_to_ask"] >= min_spread)
+]
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Visible deals", len(filtered))
